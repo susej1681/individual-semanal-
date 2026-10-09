@@ -5,7 +5,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 
 st.set_page_config(
-    page_title="Individual",
+    page_title="INDIVIDUAL",
     page_icon="🎯",
     layout="centered"
 )
@@ -25,6 +25,8 @@ ANIMALITOS_DICT = {
 }
 
 DIAS = {0: "LUNES", 1: "MARTES", 2: "MIÉRCOLES", 3: "JUEVES", 4: "VIERNES", 5: "SÁBADO", 6: "DOMINGO"}
+
+HORAS_RANGO = list(range(8, 20))  # 8 AM a 7 PM
 
 
 def fmt_num(n):
@@ -103,25 +105,15 @@ def cargar_hoja(sheet_id, nombre):
         return pd.DataFrame()
 
 
-def obtener_semanas(hoy):
-    """Devuelve las fechas de las últimas 3 semanas (lunes a domingo cada una)."""
+def obtener_semana_actual(hoy):
     dia_semana = hoy.weekday()
-    lunes_esta = hoy - timedelta(days=dia_semana)
-    semanas = []
-    for i in range(3):
-        lunes = lunes_esta - timedelta(weeks=i)
-        dias = []
-        for j in range(7):
-            d = lunes + timedelta(days=j)
-            if d <= hoy:
-                dias.append(d)
-        semanas.append({
-            "num": i + 1,
-            "lunes": lunes,
-            "dias": dias,
-            "fechas_str": [d.strftime("%d/%m/%Y") for d in dias]
-        })
-    return semanas
+    lunes = hoy - timedelta(days=dia_semana)
+    dias = []
+    for j in range(7):
+        d = lunes + timedelta(days=j)
+        if d <= hoy:
+            dias.append(d)
+    return dias
 
 
 def mostrar_dia(df_g, df_l, fecha_str, nombre_dia):
@@ -148,59 +140,70 @@ def mostrar_dia(df_g, df_l, fecha_str, nombre_dia):
     return True
 
 
-def analizar_semana_actual(df_g, df_l, semanas):
-    """Analiza la semana actual (la primera)."""
-    semana = semanas[0]
-    fechas_str = semana["fechas_str"]
-
+def analizar_semana(df_g, df_l, dias_semana):
+    """Analiza toda la semana: cuántas veces salió cada animalito."""
+    fechas_str = [d.strftime("%d/%m/%Y") for d in dias_semana]
     g = df_g[df_g["fecha"].isin(fechas_str)]
     l = df_l[df_l["fecha"].isin(fechas_str)]
-
     comb = pd.concat([g, l], ignore_index=True)
 
     if comb.empty:
-        return [], []
+        return Counter(), comb
 
     conteo = Counter(comb["numero"].tolist())
-    ordenados = sorted(conteo.items(), key=lambda x: x[1], reverse=True)
-
-    return ordenados, comb
+    return conteo, comb
 
 
-def armar_individual_y_tripleta(ordenados):
-    """Da 2 individuales y 1 tripleta."""
-    if len(ordenados) < 3:
-        return [], []
+def elegir_por_hora(df_g, df_l, dias_semana, conteo_semana, hora):
+    """Elige los animalitos para una hora específica."""
+    fechas_str = [d.strftime("%d/%m/%Y") for d in dias_semana]
 
-    nums = [n for n, _ in ordenados]
+    # Filtrar por hora
+    g_h = df_g[(df_g["fecha"].isin(fechas_str)) & (df_g["hora_num"] == hora)]
+    l_h = df_l[(df_l["fecha"].isin(fechas_str)) & (df_l["hora_num"] == hora)]
+    comb_h = pd.concat([g_h, l_h], ignore_index=True)
 
-    # Los 2 individuales: los más fuertes
-    individuales = nums[:2]
+    if comb_h.empty:
+        # Si no hay data de esa hora, usar los más activos de la semana
+        top = [n for n, _ in conteo_semana.most_common(2)]
+        return top, "Sin data de esta hora — usando los más activos de la semana"
 
-    # La tripleta: los 3 más fuertes
-    tripleta = nums[:3]
+    # Contar cuántas veces salió cada uno en esa hora
+    conteo_hora = Counter(comb_h["numero"].tolist())
 
-    return individuales, tripleta
-
-
-def tabla_38(df_g, df_l, fechas_str):
-    """Tabla de los 38 animalitos con ✅/❌ por día."""
-    g = df_g[df_g["fecha"].isin(fechas_str)]
-    l = df_l[df_l["fecha"].isin(fechas_str)]
-    comb = pd.concat([g, l], ignore_index=True)
-
-    tabla = {}
+    # Combinar: cuántas veces en esa hora + cuántas veces en la semana (para darle peso)
+    scores = {}
     for num in ANIMALITOS_DICT.keys():
-        tabla[num] = {}
-        for f_str in fechas_str:
-            dias_apariciones = comb[(comb["numero"] == num) & (comb["fecha"] == f_str)]
-            tabla[num][f_str] = len(dias_apariciones)
-    return tabla
+        v_hora = conteo_hora.get(num, 0)
+        v_semana = conteo_semana.get(num, 0)
+        # Peso: 70% hora específica + 30% semana
+        scores[num] = v_hora * 3 + v_semana * 0.5
+
+    ordenados = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    top = [n for n, _ in ordenados[:3] if scores[n] > 0]
+
+    if not top:
+        top = [n for n, _ in conteo_semana.most_common(2)]
+
+    # Decidir cuántos dar
+    # Si el #1 tiene mucho más que el #2 → 1 solo (muy fuerte)
+    if len(top) >= 2:
+        s1 = scores.get(top[0], 0)
+        s2 = scores.get(top[1], 0)
+        if s1 >= s2 * 1.8 and s1 >= 4:  # Muy fuerte
+            return [top[0]], f"🔥 {fmt_num(top[0])} {ANIMALITOS_DICT[top[0]]} MUY FUERTE a esta hora"
+        elif len(top) >= 3:
+            s3 = scores.get(top[2], 0)
+            if s3 >= s2 * 0.9 and s3 >= 3:
+                return top[:3], f"3 animalitos con buen patrón"
+        return top[:2], "2 animalitos con buen patrón"
+
+    return top[:2], "2 animalitos"
 
 
 def main():
     st.title("🎯 INDIVIDUAL")
-    st.caption("2 individuales + 1 tripleta · Granjita + Lotto · Semanal")
+    st.caption("2 animalitos por hora · Granjita + Lotto · Análisis semanal")
 
     if st.button("🔄 Recargar datos"):
         st.cache_data.clear()
@@ -226,37 +229,41 @@ def main():
     total_sorteos = len(comb_ultimo)
     st.info(f"📊 Data cargada: {total_sorteos} sorteos · Última actualización: {ultimo['fecha']}")
 
-    # SEMANAS
+    # SEMANA ACTUAL
     hoy = datetime.now().date()
-    semanas = obtener_semanas(hoy)
+    dias_semana = obtener_semana_actual(hoy)
 
     st.markdown("---")
-    st.markdown("## 🎯 INDIVIDUALES Y TRIPLETA PARA HOY")
+    st.markdown("## 🎯 ANIMALITOS POR HORA — HOY")
 
-    ordenados_actual, comb_actual = analizar_semana_actual(df_g, df_l, semanas)
+    conteo_semana, comb_semana = analizar_semana(df_g, df_l, dias_semana)
 
-    if not ordenados_actual:
-        st.warning("No hay datos suficientes esta semana.")
+    if not conteo_semana:
+        st.warning("No hay datos esta semana.")
         return
 
-    individuales, tripleta = armar_individual_y_tripleta(ordenados_actual)
+    # Para cada hora, elegir
+    for hora in HORAS_RANGO:
+        elegidos, razon = elegir_por_hora(df_g, df_l, dias_semana, conteo_semana, hora)
+        hora_str = formatear_hora(hora)
 
-    st.markdown("### 🎯 2 ANIMALITOS INDIVIDUALES")
-    for i, num in enumerate(individuales, 1):
-        veces = dict(ordenados_actual).get(num, 0)
-        st.success(f"**#{i}: {fmt_num(num)} {ANIMALITOS_DICT[num]}** — {veces} apariciones esta semana")
-
-    st.markdown("### 🎲 1 TRIPLETA")
-    nombres_trip = " + ".join([f"{fmt_num(n)} {ANIMALITOS_DICT[n]}" for n in tripleta])
-    st.info(f"**{nombres_trip}**")
+        if len(elegidos) == 1:
+            num = elegidos[0]
+            st.success(f"**🕐 {hora_str}** → 🔥 **{fmt_num(num)} {ANIMALITOS_DICT[num]}** (1 solo — MUY FUERTE)")
+        elif len(elegidos) == 3:
+            linea = " + ".join([f"{fmt_num(n)} {ANIMALITOS_DICT[n]}" for n in elegidos])
+            st.warning(f"**🕐 {hora_str}** → **{linea}** (3 animalitos)")
+        else:
+            linea = " + ".join([f"{fmt_num(n)} {ANIMALITOS_DICT[n]}" for n in elegidos])
+            st.info(f"**🕐 {hora_str}** → **{linea}**")
 
     st.markdown("---")
 
-    # VISTA DÍA POR DÍA (semana actual)
+    # VISTA DÍA POR DÍA
     st.markdown("## 📅 ANÁLISIS DÍA POR DÍA (SEMANA ACTUAL)")
     st.caption("(G) Granjita · (L) Lotto")
 
-    for dia in semanas[0]["dias"]:
+    for dia in dias_semana:
         fecha_str = dia.strftime("%d/%m/%Y")
         nombre = DIAS[dia.weekday()]
         mostrar_dia(df_g, df_l, fecha_str, nombre)
@@ -265,52 +272,34 @@ def main():
 
     # TABLA DE 38 ANIMALITOS
     st.markdown("## 📊 COMPORTAMIENTO DE LOS 38 ANIMALITOS")
-    st.caption(f"Semana actual: {semanas[0]['lunes'].strftime('%d/%m')} al {hoy.strftime('%d/%m')}")
+    st.caption(f"Semana: {dias_semana[0].strftime('%d/%m')} al {dias_semana[-1].strftime('%d/%m')}")
 
-    tabla = tabla_38(df_g, df_l, semanas[0]["fechas_str"])
+    fechas_str = [d.strftime("%d/%m/%Y") for d in dias_semana]
 
     # Headers
-    headers = "| Animalito | " + " | ".join([DIAS[d.weekday()][:3] for d in semanas[0]["dias"]]) + " | Total |"
+    headers = "| Animalito | " + " | ".join([DIAS[d.weekday()][:3] for d in dias_semana]) + " | Total |"
     st.markdown(headers)
-    st.markdown("|" + "---|" * (len(semanas[0]["dias"]) + 2))
+    st.markdown("|" + "---|" * (len(dias_semana) + 2))
 
-    # Ordenar por total
-    totales = {num: sum(tabla[num].values()) for num in tabla}
+    totales = {}
+    for num in ANIMALITOS_DICT.keys():
+        totales[num] = conteo_semana.get(num, 0)
+
     ordenados_tabla = sorted(totales.items(), key=lambda x: x[1], reverse=True)
 
     for num, total in ordenados_tabla:
         fila = f"| {fmt_num(num)} {ANIMALITOS_DICT[num]} |"
-        for d in semanas[0]["dias"]:
+        for d in dias_semana:
             f_str = d.strftime("%d/%m/%Y")
-            v = tabla[num][f_str]
+            g_d = df_g[(df_g["fecha"] == f_str) & (df_g["numero"] == num)]
+            l_d = df_l[(df_l["fecha"] == f_str) & (df_l["numero"] == num)]
+            v = len(g_d) + len(l_d)
             fila += f" {'✅' if v > 0 else '❌'} |"
         fila += f" {total} |"
         st.markdown(fila)
 
     st.markdown("---")
-
-    # REFERENCIA: 2 SEMANAS ANTERIORES
-    st.markdown("## 📅 REFERENCIA: SEMANAS ANTERIORES")
-    st.caption("Solo para ver patrones · NO se usa para jugar")
-
-    for i, semana in enumerate(semanas[1:], 1):
-        with st.expander(f"📅 Semana hace {i} semana(s) — {semana['lunes'].strftime('%d/%m')} al {(semana['lunes'] + timedelta(days=6)).strftime('%d/%m')}"):
-            fechas_str = semana["fechas_str"]
-            g = df_g[df_g["fecha"].isin(fechas_str)]
-            l = df_l[df_l["fecha"].isin(fechas_str)]
-            comb_sem = pd.concat([g, l], ignore_index=True)
-
-            if comb_sem.empty:
-                st.write("Sin datos")
-                continue
-
-            conteo = Counter(comb_sem["numero"].tolist())
-            top10 = sorted(conteo.items(), key=lambda x: x[1], reverse=True)[:10]
-            for num, veces in top10:
-                st.write(f"- **{fmt_num(num)} {ANIMALITOS_DICT[num]}** — {veces} veces")
-
-    st.markdown("---")
-    st.caption("🎯 2 individuales + 1 tripleta · Basado en la semana actual")
+    st.caption("🎯 Análisis por hora · Granjita + Lotto · Semana actual")
 
 
 if __name__ == "__main__":
