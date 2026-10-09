@@ -29,6 +29,11 @@ DIAS = {0: "LUNES", 1: "MARTES", 2: "MIÉRCOLES", 3: "JUEVES", 4: "VIERNES", 5: 
 HORAS_RANGO = list(range(8, 20))  # 8 AM a 7 PM
 
 
+def ahora_venezuela():
+    """Devuelve la hora actual de Venezuela (UTC-4)."""
+    return datetime.utcnow() - timedelta(hours=4)
+
+
 def fmt_num(n):
     if n == 100: return "00"
     if n == 0: return "0"
@@ -205,25 +210,25 @@ def main():
         st.error("No se pudieron cargar las loterías.")
         return
 
-    hoy = datetime.now().date()
+    # HORA VENEZUELA
+    ahora = ahora_venezuela()
+    hoy = ahora.date()
     hoy_str = hoy.strftime("%d/%m/%Y")
-    ahora = datetime.now()
     hora_actual = ahora.hour
     minuto_actual = ahora.minute
 
-    # PRÓXIMA HORA — CORREGIDO
+    # PRÓXIMA HORA
     proxima_hora = None
     for h in HORAS_RANGO:
         if h > hora_actual:
             proxima_hora = h
             break
         elif h == hora_actual and minuto_actual >= 55:
-            # Si ya faltan menos de 5 min para la siguiente hora
             if h + 1 in HORAS_RANGO:
                 proxima_hora = h + 1
                 break
 
-    # ÚLTIMO RESULTADO (con las 2 loterías)
+    # ÚLTIMO RESULTADO
     st.markdown("## 🎯 ÚLTIMO RESULTADO")
 
     g_hoy = df_g[df_g["fecha"] == hoy_str]
@@ -255,7 +260,7 @@ def main():
     else:
         st.write("Sin resultados de hoy")
 
-    st.info(f"📊 Data cargada: {len(df_g) + len(df_l)} sorteos · Última actualización: {hoy_str} · 🕐 Hora actual: {ahora.strftime('%H:%M')}")
+    st.info(f"📊 Data: {len(df_g) + len(df_l)} sorteos · 🕐 Hora Venezuela: {ahora.strftime('%H:%M')} · {hoy_str}")
 
     # PRÓXIMA JUGADA
     st.markdown("---")
@@ -341,8 +346,6 @@ def main():
     st.markdown("## 📊 COMPORTAMIENTO DE LOS 38 ANIMALITOS")
     st.caption(f"Semana: {dias_semana[0].strftime('%d/%m')} al {dias_semana[-1].strftime('%d/%m')}")
 
-    fechas_str = [d.strftime("%d/%m/%Y") for d in dias_semana]
-
     headers = "| Animalito | " + " | ".join([DIAS[d.weekday()][:3] for d in dias_semana]) + " | Total |"
     st.markdown(headers)
     st.markdown("|" + "---|" * (len(dias_semana) + 2))
@@ -365,7 +368,7 @@ def main():
         st.markdown(fila)
 
     st.markdown("---")
-    st.caption("🎯 Próxima hora · Último resultado con las 2 loterías · Historial del día")
+    st.caption("🎯 Hora Venezuela (UTC-4) · Próxima hora · Granjita + Lotto")
 
 
 if __name__ == "__main__":
