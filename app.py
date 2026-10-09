@@ -134,7 +134,7 @@ def elegir_por_hora(df_g, df_l, dias_semana, conteo_semana, hora):
     comb_h = pd.concat([g_h, l_h], ignore_index=True)
 
     if comb_h.empty:
-        top = [n for n, _ in conteo_semana.most_common(2)]
+        top = [n for n, _ in conteo_semana.most_common(3)]
         return top, "Sin data"
 
     conteo_hora = Counter(comb_h["numero"].tolist())
@@ -207,12 +207,25 @@ def main():
 
     hoy = datetime.now().date()
     hoy_str = hoy.strftime("%d/%m/%Y")
-    hora_actual = datetime.now().hour
+    ahora = datetime.now()
+    hora_actual = ahora.hour
+    minuto_actual = ahora.minute
+
+    # PRÓXIMA HORA — CORREGIDO
+    proxima_hora = None
+    for h in HORAS_RANGO:
+        if h > hora_actual:
+            proxima_hora = h
+            break
+        elif h == hora_actual and minuto_actual >= 55:
+            # Si ya faltan menos de 5 min para la siguiente hora
+            if h + 1 in HORAS_RANGO:
+                proxima_hora = h + 1
+                break
 
     # ÚLTIMO RESULTADO (con las 2 loterías)
     st.markdown("## 🎯 ÚLTIMO RESULTADO")
 
-    # Encontrar la última hora con resultados en cada lotería
     g_hoy = df_g[df_g["fecha"] == hoy_str]
     l_hoy = df_l[df_l["fecha"] == hoy_str]
 
@@ -242,18 +255,11 @@ def main():
     else:
         st.write("Sin resultados de hoy")
 
-    st.info(f"📊 Data cargada: {len(df_g) + len(df_l)} sorteos · Última actualización: {hoy_str}")
+    st.info(f"📊 Data cargada: {len(df_g) + len(df_l)} sorteos · Última actualización: {hoy_str} · 🕐 Hora actual: {ahora.strftime('%H:%M')}")
 
-    # PRÓXIMA HORA
+    # PRÓXIMA JUGADA
     st.markdown("---")
     st.markdown("## 🎯 PRÓXIMA JUGADA")
-
-    # Detectar próxima hora
-    proxima_hora = None
-    for h in HORAS_RANGO:
-        if h > hora_actual:
-            proxima_hora = h
-            break
 
     if proxima_hora is None:
         st.warning("Ya terminó el día (después de las 7PM). Esperá mañana.")
@@ -270,7 +276,8 @@ def main():
 
             if len(elegidos) == 1:
                 num = elegidos[0]
-                st.success(f"## 🔥 {fmt_num(num)} {ANIMALITOS_DICT[num]}\n\n**MUY FUERTE — juega 1 solo**")
+                veces = conteo_semana.get(num, 0)
+                st.success(f"## 🔥 {fmt_num(num)} {ANIMALITOS_DICT[num]}\n\n**MUY FUERTE — juega 1 solo** ({veces} veces esta semana)")
             elif len(elegidos) == 3:
                 st.warning("### 🎯 3 ANIMALITOS")
                 for num in elegidos:
@@ -291,24 +298,20 @@ def main():
     conteo_semana, _ = analizar_semana(df_g, df_l, dias_semana)
 
     for hora in HORAS_RANGO:
-        # ¿Ya salió esta hora?
         g_h = g_hoy[g_hoy["hora_num"] == hora] if not g_hoy.empty else pd.DataFrame()
         l_h = l_hoy[l_hoy["hora_num"] == hora] if not l_hoy.empty else pd.DataFrame()
 
         if g_h.empty and l_h.empty:
-            continue  # Esa hora aún no ha pasado
+            continue
 
-        # Qué predijo el sistema para esa hora
         elegidos, _ = elegir_por_hora(df_g, df_l, dias_semana, conteo_semana, hora)
 
-        # Qué salió realmente
         nums_salidos = set()
         if not g_h.empty:
             nums_salidos.add(int(g_h.iloc[0]["numero"]))
         if not l_h.empty:
             nums_salidos.add(int(l_h.iloc[0]["numero"]))
 
-        # ¿Acertó?
         aciertos = sum(1 for n in elegidos if n in nums_salidos)
 
         if aciertos == 0:
